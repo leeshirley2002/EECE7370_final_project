@@ -1,3 +1,7 @@
+# Preprocess data
+# Extract frames, faces, and cropped features (eyes, nose, mouth) from videos
+# Run download-FaceForensics.py
+# then use command python3 data.py to process data
 import cv2
 from pathlib import Path
 from deepface import DeepFace
