@@ -1,23 +1,21 @@
 import cv2
 from pathlib import Path
 from deepface import DeepFace
+import dlib
 from tqdm import tqdm
 
 def frameExtraction(vidPath, imgPath):
-    print(f"Path exists: {vidPath.exists()}")
     vidFiles = list(vidPath.glob('*.mp4'))
     print("Found " + str(len(vidFiles)) + " MP4 file(s)")
     FrameInterval = 30
-
+    frameCount = 0
     for file in tqdm(vidFiles, desc="Processing videos"):
         vid = cv2.VideoCapture(str(file))
         if not vid.isOpened():
             print(f"Error: Could not open {file.name}")
             continue
-        vidName = file.stem
-        vidOutputDir = imgPath / vidName
+        vidOutputDir = imgPath
         vidOutputDir.mkdir(parents=True, exist_ok=True)
-        frameCount = 0
         saveCount = 0
         while True:
             success, image = vid.read()
@@ -33,22 +31,24 @@ def frameExtraction(vidPath, imgPath):
 
 def faceCrop(frameInput, frameOutput):
     # Read the input image
-    imgFiles = list(frameInput.rglob('*.jpg'))
+    imgFiles = list(frameInput.glob('*.jpg'))
     print("Found " + str(len(imgFiles)) + " jpg file(s)")
     faceOutputDir = frameOutput
     faceOutputDir.mkdir(parents=True, exist_ok=True)
     totalFaces = 0
     for currImgFile in tqdm(imgFiles, desc="Cropping faces"):
         # Detect faces
+        img = cv2.imread(str(currImgFile))
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
         faces = DeepFace.extract_faces(
             img_path = str(currImgFile),
             detector_backend='retinaface',
             enforce_detection=False,
             align=True
         )
-        img = cv2.imread(str(currImgFile))
         for faceIdx, faceObj in enumerate(faces):
-            if faceObj['confidence'] < 0.97:
+            if faceObj['confidence'] <= 0.97:  # check confidence
                 continue
             faceArea = faceObj['facial_area']
             x,y,w,h=faceArea['x'], faceArea['y'], faceArea['w'], faceArea['h']
@@ -67,203 +67,120 @@ def faceCrop(frameInput, frameOutput):
     print("Face Crop Complete - Extracted " + str(totalFaces) + " faces from " + str(len(imgFiles)))
 
 def featuresCrop(frameInput, frameOutput):
-    imgFiles = list(frameInput.rglob('*.jpg'))
+    imgFiles = list(frameInput.glob('*.jpg'))
     print("Found " + str(len(imgFiles)) + " jpg file(s)")
 
-    featuresOutputDirLeft = frameOutput/"leftEye"
-    featuresOutputDirLeft.mkdir(parents=True, exist_ok=True)
-    featuresOutputDirRight = frameOutput/"rightEye"
-    featuresOutputDirRight.mkdir(parents=True, exist_ok=True)
-    featuresOutputDirNose = frameOutput/"nose"
-    featuresOutputDirNose.mkdir(parents=True, exist_ok=True)
-
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
-    mouth_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_smile.xml')
+    featureOutputDirLeft = frameOutput/"leftEye"
+    featureOutputDirLeft.mkdir(parents=True, exist_ok=True)
+    featureOutputDirRight = frameOutput/"rightEye"
+    featureOutputDirRight.mkdir(parents=True, exist_ok=True)
+    featureOutputDirNose = frameOutput/"nose"
+    featureOutputDirNose.mkdir(parents=True, exist_ok=True)
+    featureOutputDirMouth = frameOutput/"mouth"
+    featureOutputDirMouth.mkdir(parents=True, exist_ok=True)
+    
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
     totalEyes = 0
     totalNoses = 0
+    totalMouths = 0
     for currImgFile in tqdm(imgFiles, desc="Cropping features"):
         img = cv2.imread(str(currImgFile))
-        # ENHANCEMENT: Upscale low-resolution images
-        h, w = img.shape[:2]
-        if w < 200 or h < 200:
-            scale = max(200/w, 200/h)
-            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-        
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # ENHANCEMENT: Apply histogram equalization for better contrast
         gray = cv2.equalizeHist(gray)
-        
-        # ENHANCEMENT: Denoise
-        gray = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
-        
-        faces = face_cascade.detectMultiScale(
-            gray, 
-            scaleFactor=1.1,  # Smaller steps for better detection
-            minNeighbors=3, 
-            minSize=(30, 30)  # Lower minimum for small faces
-        )
-        
-        for face_idx, (fx, fy, fw, fh) in enumerate(faces):
-            roi_gray = gray[fy:fy+fh, fx:fx+fw]
-            roi_color = img[fy:fy+fh, fx:fx+fw]
-            
-            # Try multiple detection passes with different parameters
-            eyes_detected = []
-            
-            # Pass 1: Aggressive
-            eyes1 = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.02, minNeighbors=2, minSize=(10, 10))
-            eyes_detected.extend(eyes1)
-            
-            # Pass 2: Standard
-            eyes2 = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=4, minSize=(15, 15))
-            eyes_detected.extend(eyes2)
-            
-            # Remove duplicates (eyes detected in both passes)
-            unique_eyes = []
-            for (ex, ey, ew, eh) in eyes_detected:
-                is_duplicate = False
-                for (ux, uy, uw, uh) in unique_eyes:
-                    # Check if eyes overlap significantly
-                    if abs(ex - ux) < 20 and abs(ey - uy) < 20:
-                        is_duplicate = True
-                        break
-                if not is_duplicate:
-                    unique_eyes.append((ex, ey, ew, eh))
-            # Filter eyes
-            valid_eyes = []
-            for (ex, ey, ew, eh) in unique_eyes:
-                # Eyes must be in upper 70% of face
-                if ey > fh * 0.7:
-                    continue
-                # Eyes should have reasonable aspect ratio (wider than tall or roughly square)
-                eye_aspect_ratio = ew / eh
-                if eye_aspect_ratio < 0.3 or eye_aspect_ratio > 5.0:
-                    continue
-                # Eyes should not be too large relative to face
-                if ew > fw * 0.6 or eh > fh * 0.5:
-                    continue
-                valid_eyes.append((ex, ey, ew, eh))
-            
-            # Sort left to right and take only the 2 leftmost
-            valid_eyes = sorted(valid_eyes, key=lambda e: e[0])[:2]
-            
-            original_name = currImgFile.stem
-            video_folder = currImgFile.parent.name
-            eye_side="n"
-            for eye_idx, (ex, ey, ew, eh) in enumerate(valid_eyes[:2]):
-                eye_crop = roi_color[ey:ey+eh, ex:ex+ew]
-                if eye_crop.size == 0:
-                    continue
-                if eye_idx == 0:
-                    eye_side = "left"
-                else:
-                    eye_side = "right"
-                eye_filename = f"{video_folder}_{original_name}_face{face_idx}_{eye_side}_eye.jpg"
-                if eye_side=="left":
-                    output_dir=featuresOutputDirLeft
-                elif eye_side=="right":
-                    output_dir=featuresOutputDirRight
-                else:
-                    print("ERROR")
-                cv2.imwrite(str(output_dir / eye_filename), eye_crop)
-                totalEyes += 1
+    
+        original_name = currImgFile.stem
+        video_folder = currImgFile.parent.name
 
-            # DETECT MOUTH
-            # Look in lower half of face only
-            mouth_roi_y = int(fh * 0.55)
-            mouth_roi = roi_gray[mouth_roi_y:, :]
-            mouthDetected = []
-            mouths1 = mouth_cascade.detectMultiScale(
-                mouth_roi,
-                scaleFactor=1.1,
-                minNeighbors=15,  # High to avoid false positives
-                minSize=(25, 12)
-            )
-            mouthDetected.extend(mouths1)
-            mouths2 = mouth_cascade.detectMultiScale(
-                mouth_roi,
-                scaleFactor=1.05,
-                minNeighbors=7,
-                minSize=(20, 10)
-            )
-            mouthDetected.extend(mouths2)
-            # Find the most likely mouth (lowest in face, reasonably centered)
-            valid_mouth = None
-            if len(mouthDetected) > 0:
-                # Filter mouths - should be in lower portion and centered
-                for (mx, my, mw, mh) in mouthDetected:
-                    # Adjust y coordinate back to full face ROI
-                    actual_my = my + mouth_roi_y
-                    # Mouth should be in lower 45% of face
-                    if actual_my < fh * 0.55:
-                        continue
-                    # Mouth should be reasonably centered
-                    mouth_center_x = mx + mw/2
-                    if mouth_center_x < fw * 0.2 or mouth_center_x > fw * 0.8:
-                        continue
-                    # Take the lowest mouth (most likely to be actual mouth)
-                    if valid_mouth is None or actual_my > valid_mouth[1]:
-                        valid_mouth = (mx, actual_my, mw, mh)
-
-            # DETECT NOSE
-            # Use fixed position if no eyes found
-            if len(valid_eyes) >=1:
-                if len(valid_eyes) >= 2:
-                    avg_eye_y = (valid_eyes[0][1] + valid_eyes[1][1]) // 2
-                    avg_eye_h = (valid_eyes[0][3] + valid_eyes[1][3]) // 2
-                    nose_top = avg_eye_y + int(avg_eye_h * 1.0)
-                else:
-                    nose_top = valid_eyes[0][1] + int(valid_eyes[0][3] * 1.2)
-                # Determine bottom boundary from mouth
-                if valid_mouth is not None:
-                    # Nose ends just above mouth (leave small gap)
-                    nose_bottom = valid_mouth[1] - int(fh * 0.03)
-                else:
-                    # No mouth detected - use conservative estimate
-                    nose_bottom = int(fh * 0.68)
-                # Calculate nose height
-                nose_h = nose_bottom - nose_top
-                
-                # Ensure minimum height
-                if nose_h < int(fh * 0.20):
-                    # If too small, extend down more
-                    nose_bottom = nose_top + int(fh * 0.28)
-                    nose_h = nose_bottom - nose_top
-                
-                # Ensure nose doesn't extend too far down
-                if nose_bottom > fh * 0.75:
-                    nose_bottom = int(fh * 0.68)
-                    nose_h = nose_bottom - nose_top
-            else:
-                continue
+        faces = detector(gray, 1)
+        for face_idx, face in enumerate(faces):
+            landmarks = predictor(gray, face)
+            # Left Eye Detection
+            left_eye_points = []
+            for n in range(36, 42):
+                x = landmarks.part(n).x
+                y = landmarks.part(n).y
+                left_eye_points.append((x, y))
+            if left_eye_points:
+                x_coords = [p[0] for p in left_eye_points]
+                y_coords = [p[1] for p in left_eye_points]
+                padding = 10
+                x_min = max(0, min(x_coords) - padding)
+                y_min = max(0, min(y_coords) - padding)
+                x_max = min(img.shape[1], max(x_coords) + padding)
+                y_max = min(img.shape[0], max(y_coords) + padding)
+                left_eye_crop = img[y_min:y_max, x_min:x_max]
+                if left_eye_crop.size > 0:
+                    eye_filename = f"{video_folder}_{original_name}_face{face_idx}_left_eye.jpg"
+                    cv2.imwrite(str(featureOutputDirLeft / eye_filename), left_eye_crop)
+                    totalEyes += 1
             
-            nose_x = int(fw * 0.28)
-            nose_w = int(fw * 0.44)
-            
-            nose_y_end = min(nose_top + nose_h, fh)
-            nose_x_end = min(nose_x + nose_w, fw)
+            # Right Eye Detection
+            right_eye_points = []
+            for n in range(42, 48):
+                x = landmarks.part(n).x
+                y = landmarks.part(n).y
+                right_eye_points.append((x, y))
+            if right_eye_points:
+                x_coords = [p[0] for p in right_eye_points]
+                y_coords = [p[1] for p in right_eye_points]
+                padding = 10
+                x_min = max(0, min(x_coords) - padding)
+                y_min = max(0, min(y_coords) - padding)
+                x_max = min(img.shape[1], max(x_coords) + padding)
+                y_max = min(img.shape[0], max(y_coords) + padding)
+                right_eye_crop = img[y_min:y_max, x_min:x_max]
+                if right_eye_crop.size > 0:
+                    eye_filename = f"{video_folder}_{original_name}_face{face_idx}_right_eye.jpg"
+                    cv2.imwrite(str(featureOutputDirRight / eye_filename), right_eye_crop)
+                    totalEyes += 1
 
-            # Validate
-            if nose_top < 0 or nose_top >= nose_y_end:
-                continue
-            if nose_top > fh * 0.55:
-                continue
-
-            if nose_x < nose_x_end:
-                nose_crop = roi_color[nose_top:nose_y_end, nose_x:nose_x_end]
+            # Nose Detection
+            nose_points = []
+            for n in range(27, 36):
+                x = landmarks.part(n).x
+                y = landmarks.part(n).y
+                nose_points.append((x, y))
+            if nose_points:
+                x_coords = [p[0] for p in nose_points]
+                y_coords = [p[1] for p in nose_points]
+                padding = 15
+                x_min = max(0, min(x_coords) - padding)
+                y_min = max(0, min(y_coords) - padding)
+                x_max = min(img.shape[1], max(x_coords) + padding)
+                y_max = min(img.shape[0], max(y_coords) + padding)
+                nose_crop = img[y_min:y_max, x_min:x_max]
                 if nose_crop.size > 0:
                     nose_filename = f"{video_folder}_{original_name}_face{face_idx}_nose.jpg"
-                    cv2.imwrite(str(featuresOutputDirNose / nose_filename), nose_crop)
+                    cv2.imwrite(str(featureOutputDirNose / nose_filename), nose_crop)
                     totalNoses += 1
-    print("Features Crop Complete - Extracted " + str(totalEyes) + " eyes and " + str(totalNoses) + " noses from " + str(len(imgFiles)))
 
-origVidPath = Path("Archive/FFData/original_sequences/youtube/c23/videos")
+            # Mouth Detection
+            mouth_points = []
+            for n in range(48, 68):
+                x = landmarks.part(n).x
+                y = landmarks.part(n).y
+                mouth_points.append((x, y))
+            if mouth_points:
+                x_coords = [p[0] for p in mouth_points]
+                y_coords = [p[1] for p in mouth_points]
+                padding = 10
+                x_min = max(0, min(x_coords) - padding)
+                y_min = max(0, min(y_coords) - padding)
+                x_max = min(img.shape[1], max(x_coords) + padding)
+                y_max = min(img.shape[0], max(y_coords) + padding)
+                mouth_crop = img[y_min:y_max, x_min:x_max]
+                if mouth_crop.size > 0:
+                    mouth_filename = f"{video_folder}_{original_name}_face{face_idx}_mouth.jpg"
+                    cv2.imwrite(str(featureOutputDirMouth / mouth_filename), mouth_crop)
+                    totalMouths += 1
+    print(f"Features Crop Complete - Extracted {totalEyes} eyes, {totalNoses} noses, and {totalMouths} mouths from {len(imgFiles)}")
+
+origVidPath = Path("FFData/original_sequences/youtube/c23/videos")
 origImgPath = Path("Frames/original")
 frameExtraction(origVidPath, origImgPath)
-manipVidPath = Path("Archive/FFData/manipulated_sequences/Deepfakes/c23/videos")
+manipVidPath = Path("FFData/manipulated_sequences/Deepfakes/c23/videos")
 manipImgPath = Path("Frames/manipulated")
 frameExtraction(manipVidPath, manipImgPath)
 
@@ -280,12 +197,3 @@ featuresCrop(origFramePath, origFrameOut)
 manipFramePath = Path("CroppedFaces/manipulated")
 manipFrameOut = Path("Features/manipulated")
 featuresCrop(manipFramePath, manipFrameOut)
-
-origFramePath = Path("CroppedFaces/original")
-origFrameOut = Path("Features/original")
-featuresCrop(origFramePath, origFrameOut)
-manipFramePath = Path("CroppedFaces/manipulated")
-manipFrameOut = Path("Features/manipulated")
-featuresCrop(manipFramePath, manipFrameOut)
-# 1520 eyes, 620 deleted, 900 eyes remain
-# 157 noses, 25 deleted, 132 noses remain
