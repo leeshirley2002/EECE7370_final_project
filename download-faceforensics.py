@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-# Command to download 100 original videos:
-# python3 download-FaceForensics.py ./FFData -d original -c c23 -t videos -n 100 --server EU2
-# Command to download 100 deepfake videos
-# python3 download-FaceForensics.py ./FFData -d Deepfakes -c c23 -t videos -n 100 --server EU2
+# Command to download original videos:
+# python3 download-faceforensics.py ./FFData -d original -c c23 -t videos --server EU2
+# Command to download deepfake videos
+# python3 download-faceforensics.py ./FFData -d Deepfakes -c c23 -t videos --server EU2
 """ Downloads FaceForensics++ and Deep Fake Detection public data release
 Example usage:
     see -h or https://github.com/ondyari/FaceForensics
@@ -183,7 +183,7 @@ def main(args):
         if 'DeepFakeDetection' in dataset_path or 'actors' in dataset_path:
         	filepaths = json.loads(urllib.request.urlopen(args.base_url + '/' +
                 DEEPFEAKES_DETECTION_URL).read().decode("utf-8"))
-        	if 'actors' in dataset_path:
+            if 'actors' in dataset_path:
         		filelist = filepaths['actors']
         	else:
         		filelist = filepaths['DeepFakesDetection']
