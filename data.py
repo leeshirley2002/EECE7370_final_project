@@ -260,19 +260,26 @@ def featuresCrop(frameInput, frameOutput):
                     totalNoses += 1
     print("Features Crop Complete - Extracted " + str(totalEyes) + " eyes and " + str(totalNoses) + " noses from " + str(len(imgFiles)))
 
-origVidPath = Path("FFData/original_sequences/youtube/c23/videos")
+origVidPath = Path("Archive/FFData/original_sequences/youtube/c23/videos")
 origImgPath = Path("Frames/original")
 frameExtraction(origVidPath, origImgPath)
-manipVidPath = Path("FFData/manipulated_sequences/Deepfakes/c23/videos")
+manipVidPath = Path("Archive/FFData/manipulated_sequences/Deepfakes/c23/videos")
 manipImgPath = Path("Frames/manipulated")
 frameExtraction(manipVidPath, manipImgPath)
 
 origFramePath = Path("Frames/original")
-manipFrameOut = Path("CroppedFaces/original")
-faceCrop(origFramePath, manipFrameOut)
+origFrameOut = Path("CroppedFaces/original")
+faceCrop(origFramePath, origFrameOut)
 manipFramePath = Path("Frames/manipulated")
 manipFrameOut = Path("CroppedFaces/manipulated")
-faceCrop(origFramePath, manipFrameOut)
+faceCrop(manipFramePath, manipFrameOut)
+
+origFramePath = Path("CroppedFaces/original")
+origFrameOut = Path("Features/original")
+featuresCrop(origFramePath, origFrameOut)
+manipFramePath = Path("CroppedFaces/manipulated")
+manipFrameOut = Path("Features/manipulated")
+featuresCrop(manipFramePath, manipFrameOut)
 
 origFramePath = Path("CroppedFaces/original")
 origFrameOut = Path("Features/original")
